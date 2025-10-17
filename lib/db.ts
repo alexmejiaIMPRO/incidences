@@ -2,11 +2,9 @@ import Database from "better-sqlite3"
 import path from "path"
 
 let db: Database.Database | null = null
-let isInitialized = false // Bandera para asegurar que el setup solo se ejecuta una vez
+let isInitialized = false
 
-// 🛑 SQL para inicialización: Crea todas las tablas si no existen.
 const SETUP_SQL = `
-    -- Crear tabla users
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         email TEXT UNIQUE NOT NULL,
@@ -20,7 +18,6 @@ const SETUP_SQL = `
         FOREIGN KEY (supervisor_id) REFERENCES users(id)
     );
 
-    -- Crear tabla de solicitudes de ausencia
     CREATE TABLE IF NOT EXISTS absence_requests (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         employee_id INTEGER NOT NULL,
@@ -29,7 +26,6 @@ const SETUP_SQL = `
         end_date TEXT NOT NULL,
         total_days REAL NOT NULL,
         reason TEXT NOT NULL,
-        -- NOTA: El campo 'status' ahora puede contener 'ARCHIVED'
         status TEXT NOT NULL DEFAULT 'PENDING',
         current_approval_stage TEXT NOT NULL DEFAULT 'SUPERVISOR',
         hours_per_day REAL DEFAULT 8.0,
@@ -43,7 +39,6 @@ const SETUP_SQL = `
         FOREIGN KEY (employee_id) REFERENCES users(id)
     );
 
-    -- Crear tabla de historial de aprobación
     CREATE TABLE IF NOT EXISTS approval_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         request_id INTEGER NOT NULL,
@@ -56,7 +51,6 @@ const SETUP_SQL = `
         FOREIGN KEY (approver_id) REFERENCES users(id)
     );
     
-    -- Crear tabla de notificaciones
     CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -76,7 +70,6 @@ export function getDatabase() {
     db.pragma("journal_mode = WAL")
   }
 
-  // 1. Ejecutar el setup solo una vez por proceso (Node.js)
   if (!isInitialized) {
     try {
         db.exec(SETUP_SQL);
@@ -99,7 +92,6 @@ export function closeDatabase() {
   }
 }
 
-// User types
 export type UserRole = "EMPLOYEE" | "SUPERVISOR" | "MANAGER" | "HR" | "PAYROLL"
 
 export interface User {
@@ -114,9 +106,6 @@ export interface User {
   updated_at: string
 }
 
-// lib/db.ts
-// ...
-// Absence request types
 export type RequestType = 
     | "permisoConGoce" 
     | "permisoSinGoce" 
@@ -125,11 +114,9 @@ export type RequestType =
     | "paseSalida" 
     | "cambioTurno" 
     | "tiempoPorTiempo"
-    | "VACATION" | "SICK_LEAVE" | "PERSONAL" | "UNPAID" | "OTHER" // Keep old ones for safety
+    | "VACATION" | "SICK_LEAVE" | "PERSONAL" | "UNPAID" | "OTHER"
     
-// MODIFICACIÓN CLAVE: Añadimos 'ARCHIVED'
 export type RequestStatus = "PENDING" | "APPROVED" | "DECLINED" | "CANCELLED" | "ARCHIVED"
-// ...
 export type ApprovalStage = "SUPERVISOR" | "MANAGER" | "HR" | "PAYROLL" | "COMPLETED"
 
 export interface AbsenceRequest {
@@ -171,10 +158,8 @@ export interface Notification {
   created_at: string
 }
 
-// Database query functions
 export function getUserByEmail(email: string): User | undefined {
   const db = getDatabase()
-  // Ya que el esquema ahora se inicializa, esta consulta funcionará.
   return db.prepare("SELECT * FROM users WHERE email = ?").get(email) as User | undefined
 }
 
@@ -201,7 +186,7 @@ export function createAbsenceRequest(data: {
     .prepare(`
     INSERT INTO absence_requests (
       employee_id, request_type, start_date, end_date, total_days, reason,
-      hours_per_day, paid_days, unpaid_days, unpaid_days_comments, shift_details
+      hours_per_day, paid_days, unpaid_days, unpaid_comments, shift_details
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
@@ -224,7 +209,6 @@ export function createAbsenceRequest(data: {
 
 export function getAbsenceRequestsByEmployee(employeeId: number): AbsenceRequest[] {
   const db = getDatabase()
-  // MODIFICACIÓN CLAVE: Filtramos solicitudes que NO están en estado 'ARCHIVED'
   return db
     .prepare("SELECT * FROM absence_requests WHERE employee_id = ? AND status != 'ARCHIVED' ORDER BY created_at DESC")
     .all(employeeId) as AbsenceRequest[]
@@ -237,7 +221,6 @@ export function getAbsenceRequestById(id: number): AbsenceRequest | undefined {
 
 export function getPendingRequestsByStage(stage: ApprovalStage): AbsenceRequest[] {
   const db = getDatabase()
-  // También aseguramos que las solicitudes PENDIENTES NO sean ARCHIVED
   return db
     .prepare(`
     SELECT * FROM absence_requests 
@@ -293,7 +276,6 @@ export function createNotification(data: {
 
 export function getUnreadNotifications(userId: number): Notification[] {
   const db = getDatabase()
-  // Se asume que las notificaciones de solicitudes archivadas deben seguir visibles
   return db
     .prepare("SELECT * FROM notifications WHERE user_id = ? AND is_read = 0 ORDER BY created_at DESC")
     .all(userId) as Notification[]
@@ -304,23 +286,13 @@ export function markNotificationAsRead(notificationId: number): void {
   db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ?").run(notificationId)
 }
 
-// NOTA: Esta función de eliminación REAL ya no se usará en el dashboard, 
-// pero la mantenemos por si la necesitas para tareas de administración.
 export function deleteAbsenceRequest(id: number): boolean {
   const db = getDatabase();
   
-  // Usamos una transacción para asegurar que la eliminación sea atómica.
   const runDeletion = db.transaction(() => {
-    // 1. Eliminar notificaciones asociadas
     db.prepare('DELETE FROM notifications WHERE request_id = ?').run(id);
-
-    // 2. Eliminar historial de aprobación asociado
     db.prepare('DELETE FROM approval_history WHERE request_id = ?').run(id);
-
-    // 3. Eliminar la solicitud de ausencia principal
     const info = db.prepare('DELETE FROM absence_requests WHERE id = ?').run(id);
-
-    // Retorna true si se eliminó una fila de absence_requests
     return info.changes > 0;
   });
 
@@ -343,11 +315,10 @@ export function getCalendarRequests(filters: {
       u.email as employee_email
     FROM absence_requests ar
     JOIN users u ON ar.employee_id = u.id
-    WHERE ar.status != 'ARCHIVED' -- FILTRO CLAVE: Excluir archivadas
+    WHERE ar.status != 'ARCHIVED'
   `
   const params: any[] = []
 
-  // Role-based filtering
   if (filters.userRole === "EMPLOYEE") {
     query += " AND ar.employee_id = ?"
     params.push(filters.userId)
@@ -355,9 +326,7 @@ export function getCalendarRequests(filters: {
     query += " AND u.supervisor_id = ?"
     params.push(filters.userId)
   }
-  // MANAGER, HR, and PAYROLL can see all requests
 
-  // Date range filtering
   if (filters.startDate) {
     query += " AND ar.end_date >= ?"
     params.push(filters.startDate)
@@ -367,13 +336,11 @@ export function getCalendarRequests(filters: {
     params.push(filters.endDate)
   }
 
-  // Employee filtering
   if (filters.employeeId) {
     query += " AND ar.employee_id = ?"
     params.push(Number.parseInt(filters.employeeId))
   }
 
-  // Status filtering
   if (filters.status && filters.status !== "all") {
     query += " AND ar.status = ?"
     params.push(filters.status)
