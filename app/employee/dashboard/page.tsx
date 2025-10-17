@@ -313,18 +313,7 @@ const handleDeleteRequest = async (e: React.MouseEvent, requestId: number) => {
                               {getStatusIcon(request.status)}
                               {request.status}
                             </span>
-                            {/* 4. Delete button for PENDING or DECLINED */}
-                            {(request.status === "PENDING" || request.status === "DECLINED") && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="text-red-500 hover:bg-red-50/50 hover:text-red-700 h-8 w-8"
-                                onClick={(e) => handleDeleteRequest(e, request.id)}
-                                title="Delete Request"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
+                            
                           </div>
                         </div>
                         <div className="flex items-center gap-4 text-sm text-gray-600 mt-3">
@@ -433,14 +422,7 @@ const handleDeleteRequest = async (e: React.MouseEvent, requestId: number) => {
               {/* Actions */}
               <div className="flex gap-3 pt-4">
                 
-                {(selectedRequest.status === "PENDING" || selectedRequest.status === "DECLINED") && (
-                  <Button
-                    variant="destructive"
-                    onClick={(e) => handleDeleteRequest(e, selectedRequest.id)}
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" /> Delete
-                  </Button>
-                )}
+                
               </div>
             </div>
           </div>
